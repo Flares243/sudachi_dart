@@ -1,6 +1,6 @@
 name: sudachi_dart
 description: "Flutter FFI plugin for Japanese morphological analysis using Sudachi. Tokenizes Japanese text into morphemes with POS tags, readings, and dictionary forms."
-version: 0.0.3
+version: 0.0.3+1
 repository: https://github.com/Flares243/sudachi_dart
 homepage: https://github.com/Flares243/sudachi_dart
 

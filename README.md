@@ -7,8 +7,8 @@ A Flutter FFI plugin for Japanese morphological analysis using [Sudachi](https:/
 | Platform | Supported |
 |----------|-----------|
 | macOS    | ✓         |
-| Linux    | ✓         |
 | Windows  | ✓         |
+| Linux    | ✗         |
 | iOS      | ✗         |
 | Android  | ✗         |
 
