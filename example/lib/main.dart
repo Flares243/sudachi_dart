@@ -4,22 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sudachi_dart/sudachi_dart.dart';
+import 'package:path/path.dart' as path;
 
 Future<({String dictFile, String jsonFile})>
 _extractDictionaryIfNeeded() async {
   final appDir = await getApplicationSupportDirectory();
+  final sudachiDir = Directory(path.join(appDir.path, 'sudachi'));
+  sudachiDir.createSync(recursive: true);
 
-  final sudachiJsonFile = File('${appDir.path}/sudachi/sudachi.json');
+  final sudachiJsonFile = File(
+    path.join(appDir.path, 'sudachi', 'sudachi.json'),
+  );
 
   if (!sudachiJsonFile.existsSync()) {
     final bytes = await rootBundle.load('assets/sudachi/sudachi.json');
     await sudachiJsonFile.writeAsBytes(bytes.buffer.asUint8List());
   }
 
-  final dictionaryDir = Directory('${appDir.path}/sudachi/dictionary');
+  final dictionaryDir = Directory(
+    path.join(appDir.path, 'sudachi', 'dictionary'),
+  );
   await dictionaryDir.create(recursive: true);
 
-  final dicFile = File('${dictionaryDir.path}/system_full.dic');
+  final dicFile = File(path.join(dictionaryDir.path, 'system_full.dic'));
+
   if (!dicFile.existsSync()) {
     final bytes = await rootBundle.load('assets/sudachi/system_full.dic');
     await dicFile.writeAsBytes(bytes.buffer.asUint8List());
