@@ -1,108 +1,324 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:ffi';
 import 'dart:isolate';
+
+import 'package:ffi/ffi.dart';
 
 import 'sudachi_dart_bindings_generated.dart' as bindings;
 
-/// A very short-lived native function.
-///
-/// For very short-lived functions, it is fine to call them on the main isolate.
-/// They will block the Dart execution while running the native function, so
-/// only do this for native functions which are guaranteed to be short-lived.
-int sum(int a, int b) => bindings.sum(a, b);
+// -- Types ------------------------------------------------------------------
 
-/// A longer lived native function, which occupies the thread calling it.
-///
-/// Do not call these kind of native functions in the main isolate. They will
-/// block Dart execution. This will cause dropped frames in Flutter applications.
-/// Instead, call these native functions on a separate isolate.
-///
-/// Modify this to suit your own use case. Example use cases:
-///
-/// 1. Reuse a single isolate for various different kinds of requests.
-/// 2. Use multiple helper isolates for parallel execution.
-Future<int> sumAsync(int a, int b) async {
-  final SendPort helperIsolateSendPort = await _helperIsolateSendPort;
-  final int requestId = _nextSumRequestId++;
-  final _SumRequest request = _SumRequest(requestId, a, b);
-  final Completer<int> completer = Completer<int>();
-  _sumRequests[requestId] = completer;
-  helperIsolateSendPort.send(request);
-  return completer.future;
+/// Tokenization split granularity.
+enum Mode {
+  /// Short, atomic units (most granular).
+  a,
+
+  /// Middle granularity.
+  b,
+
+  /// Natural-language / named-entity units (least granular, default).
+  c,
 }
 
-/// A request to compute `sum`.
+/// A single morpheme (token) returned by the tokenizer.
+class Morpheme {
+  final String surface;
+  final String dictionaryForm;
+  final String normalizedForm;
+  final String readingForm;
+
+  /// Hierarchical part-of-speech tags (up to 8 elements including conjugation).
+  final List<String> partOfSpeech;
+
+  const Morpheme({
+    required this.surface,
+    required this.dictionaryForm,
+    required this.normalizedForm,
+    required this.readingForm,
+    required this.partOfSpeech,
+  });
+
+  factory Morpheme._fromJson(Map<String, dynamic> json) => Morpheme(
+    surface: json['surface'] as String,
+    dictionaryForm: json['dictionary_form'] as String,
+    normalizedForm: json['normalized_form'] as String,
+    readingForm: json['reading_form'] as String,
+    partOfSpeech: List<String>.from(json['part_of_speech'] as List),
+  );
+
+  @override
+  String toString() =>
+      'Morpheme(surface: $surface, dictionaryForm: $dictionaryForm, '
+      'readingForm: $readingForm, pos: ${partOfSpeech.take(2).join('-')})';
+}
+
+// -- Finalizers (release native memory if dispose() is forgotten) -----------
+
+final _dictFinalizer = NativeFinalizer(
+  Native.addressOf<
+        NativeFunction<Void Function(Pointer<bindings.DictionaryHandle>)>
+      >(bindings.sudachi_free_dictionary)
+      .cast(),
+);
+
+final _tokenizerFinalizer = NativeFinalizer(
+  Native.addressOf<
+        NativeFunction<Void Function(Pointer<bindings.TokenizerHandle>)>
+      >(bindings.sudachi_free_tokenizer)
+      .cast(),
+);
+
+// -- SudachiDictionary ------------------------------------------------------
+
+/// A loaded Sudachi dictionary.
 ///
-/// Typically sent from one isolate to another.
-class _SumRequest {
+/// Load once with [init], then share across [SudachiTokenizer]s.
+/// Call [dispose] when done.
+class SudachiDictionary implements Finalizable {
+  final Pointer<bindings.DictionaryHandle> _handle;
+  bool _disposed = false;
+
+  SudachiDictionary._(this._handle) {
+    _dictFinalizer.attach(this, _handle.cast(), detach: this);
+  }
+
+  /// Loads the dictionary on a background isolate.
+  ///
+  /// Safe to call from the UI isolate — does not block.
+  static Future<SudachiDictionary> init({
+    String? configPath,
+    String? resourceDir,
+    String? dictionaryPath,
+  }) async {
+    final address = await Isolate.run(
+      () => _callNativeInitDictionary(configPath, resourceDir, dictionaryPath),
+    );
+    return SudachiDictionary._(Pointer.fromAddress(address));
+  }
+
+  /// Frees the native dictionary. Do not use this object afterwards.
+  void dispose() {
+    if (!_disposed) {
+      _dictFinalizer.detach(this);
+      bindings.sudachi_free_dictionary(_handle);
+      _disposed = true;
+    }
+  }
+}
+
+// -- SudachiTokenizer -------------------------------------------------------
+
+/// A Japanese tokenizer backed by a [SudachiDictionary].
+///
+/// Call [dispose] when done.
+class SudachiTokenizer implements Finalizable {
+  final Pointer<bindings.TokenizerHandle> _handle;
+  bool _disposed = false;
+
+  SudachiTokenizer._(this._handle) {
+    _tokenizerFinalizer.attach(this, _handle.cast(), detach: this);
+  }
+
+  /// Creates a tokenizer from [dictionary].
+  ///
+  /// The tokenizer keeps its own reference to the dictionary data,
+  /// so [dictionary] can be disposed after this call.
+  ///
+  /// Safe to call from the UI isolate — does not block.
+  ///
+  /// Throws [StateError] if initialisation fails.
+  static Future<SudachiTokenizer> init(SudachiDictionary dictionary) async {
+    if (dictionary._disposed) {
+      throw StateError('Cannot create tokenizer from a disposed dictionary.');
+    }
+
+    final dictHandleAddress = dictionary._handle.address;
+    final address = await Isolate.run(
+      () => _callNativeInitTokenizer(dictHandleAddress),
+    );
+
+    return SudachiTokenizer._(Pointer.fromAddress(address));
+  }
+
+  /// Tokenizes [text] on a background isolate.
+  Future<List<Morpheme>> tokenize(
+    String text, {
+    Mode mode = Mode.c,
+    bool enableDebug = false,
+  }) async {
+    if (_disposed) throw StateError('Tokenizer has been disposed.');
+
+    final port = await _helperIsolateSendPort;
+    final id = _nextRequestId++;
+    final completer = Completer<List<Morpheme>>();
+
+    _pendingRequests[id] = completer;
+    port.send(_TokenizeRequest(id, _handle.address, text, mode, enableDebug));
+
+    return completer.future;
+  }
+
+  /// Frees the native tokenizer. Do not use this object afterwards.
+  void dispose() {
+    if (!_disposed) {
+      _tokenizerFinalizer.detach(this);
+      bindings.sudachi_free_tokenizer(_handle);
+      _disposed = true;
+    }
+  }
+}
+
+// -- Native helpers (isolate-safe) ------------------------------------------
+
+int _callNativeInitDictionary(
+  String? configPath,
+  String? resourceDir,
+  String? dictionaryPath,
+) {
+  final configPathPtr = configPath?.toNativeUtf8() ?? nullptr;
+  final resourceDirPtr = resourceDir?.toNativeUtf8() ?? nullptr;
+  final dictionaryPathPtr = dictionaryPath?.toNativeUtf8() ?? nullptr;
+
+  try {
+    final handle = bindings.sudachi_init_dictionary(
+      configPathPtr.cast(),
+      resourceDirPtr.cast(),
+      dictionaryPathPtr.cast(),
+    );
+
+    if (handle == nullptr) {
+      throw StateError(
+        'Failed to initialize Sudachi dictionary from: $dictionaryPath',
+      );
+    }
+
+    return handle.address;
+  } finally {
+    malloc.free(configPathPtr);
+    malloc.free(resourceDirPtr);
+    malloc.free(dictionaryPathPtr);
+  }
+}
+
+int _callNativeInitTokenizer(int dictionaryHandleAddress) {
+  final dictHandle = Pointer<bindings.DictionaryHandle>.fromAddress(
+    dictionaryHandleAddress,
+  );
+  final handle = bindings.sudachi_init_tokenizer(dictHandle);
+  if (handle == nullptr) {
+    throw StateError('Failed to initialize Sudachi tokenizer.');
+  }
+  return handle.address;
+}
+
+List<Morpheme> _callNativeTokenize(
+  int handleAddress,
+  String text,
+  Mode mode,
+  bool enableDebug,
+) {
+  final handle = Pointer<bindings.TokenizerHandle>.fromAddress(handleAddress);
+  final textPtr = text.toNativeUtf8();
+  try {
+    final resultPtr = bindings.sudachi_tokenize(
+      handle,
+      textPtr.cast(),
+      mode.index,
+      enableDebug ? 1 : 0,
+    );
+    if (resultPtr == nullptr) {
+      throw StateError('Tokenization failed — native function returned null.');
+    }
+    try {
+      final jsonStr = resultPtr.cast<Utf8>().toDartString();
+      final decoded = jsonDecode(jsonStr) as List<dynamic>;
+      return decoded
+          .cast<Map<String, dynamic>>()
+          .map(Morpheme._fromJson)
+          .toList();
+    } finally {
+      bindings.sudachi_free_string(resultPtr);
+    }
+  } finally {
+    malloc.free(textPtr);
+  }
+}
+
+// -- Async helper isolate ---------------------------------------------------
+
+class _TokenizeRequest {
   final int id;
-  final int a;
-  final int b;
+  final int handleAddress;
+  final String text;
+  final Mode mode;
+  final bool enableDebug;
 
-  const _SumRequest(this.id, this.a, this.b);
+  const _TokenizeRequest(
+    this.id,
+    this.handleAddress,
+    this.text,
+    this.mode,
+    this.enableDebug,
+  );
 }
 
-/// A response with the result of `sum`.
-///
-/// Typically sent from one isolate to another.
-class _SumResponse {
+class _TokenizeResponse {
   final int id;
-  final int result;
+  final List<Morpheme>? result;
+  final String? error;
 
-  const _SumResponse(this.id, this.result);
+  const _TokenizeResponse(this.id, {this.result, this.error});
 }
 
-/// Counter to identify [_SumRequest]s and [_SumResponse]s.
-int _nextSumRequestId = 0;
+int _nextRequestId = 0;
+final Map<int, Completer<List<Morpheme>>> _pendingRequests = {};
 
-/// Mapping from [_SumRequest] `id`s to the completers corresponding to the correct future of the pending request.
-final Map<int, Completer<int>> _sumRequests = <int, Completer<int>>{};
+final Future<SendPort> _helperIsolateSendPort = _spawnHelper();
 
-/// The SendPort belonging to the helper isolate.
-Future<SendPort> _helperIsolateSendPort = () async {
-  // The helper isolate is going to send us back a SendPort, which we want to
-  // wait for.
-  final Completer<SendPort> completer = Completer<SendPort>();
+Future<SendPort> _spawnHelper() async {
+  final completer = Completer<SendPort>();
 
-  // Receive port on the main isolate to receive messages from the helper.
-  // We receive two types of messages:
-  // 1. A port to send messages on.
-  // 2. Responses to requests we sent.
-  final ReceivePort receivePort = ReceivePort()
+  final receivePort = ReceivePort()
     ..listen((dynamic data) {
       if (data is SendPort) {
-        // The helper isolate sent us the port on which we can sent it requests.
         completer.complete(data);
         return;
       }
-      if (data is _SumResponse) {
-        // The helper isolate sent us a response to a request we sent.
-        final Completer<int> completer = _sumRequests[data.id]!;
-        _sumRequests.remove(data.id);
-        completer.complete(data.result);
+      if (data is _TokenizeResponse) {
+        final pending = _pendingRequests.remove(data.id);
+        if (pending == null) return;
+        if (data.error != null) {
+          pending.completeError(StateError(data.error!));
+        } else {
+          pending.complete(data.result!);
+        }
         return;
       }
-      throw UnsupportedError('Unsupported message type: ${data.runtimeType}');
+      throw UnsupportedError('Unexpected message type: ${data.runtimeType}');
     });
 
-  // Start the helper isolate.
-  await Isolate.spawn((SendPort sendPort) async {
-    final ReceivePort helperReceivePort = ReceivePort()
+  await Isolate.spawn((SendPort sendPort) {
+    final helperPort = ReceivePort()
       ..listen((dynamic data) {
-        // On the helper isolate listen to requests and respond to them.
-        if (data is _SumRequest) {
-          final int result = bindings.sum_long_running(data.a, data.b);
-          final _SumResponse response = _SumResponse(data.id, result);
-          sendPort.send(response);
+        if (data is _TokenizeRequest) {
+          try {
+            final result = _callNativeTokenize(
+              data.handleAddress,
+              data.text,
+              data.mode,
+              data.enableDebug,
+            );
+            sendPort.send(_TokenizeResponse(data.id, result: result));
+          } catch (e) {
+            sendPort.send(_TokenizeResponse(data.id, error: e.toString()));
+          }
           return;
         }
-        throw UnsupportedError('Unsupported message type: ${data.runtimeType}');
+        throw UnsupportedError('Unexpected message type: ${data.runtimeType}');
       });
-
-    // Send the port to the main isolate on which we can receive requests.
-    sendPort.send(helperReceivePort.sendPort);
+    sendPort.send(helperPort.sendPort);
   }, receivePort.sendPort);
 
-  // Wait until the helper isolate has sent us back the SendPort on which we
-  // can start sending requests.
   return completer.future;
-}();
+}

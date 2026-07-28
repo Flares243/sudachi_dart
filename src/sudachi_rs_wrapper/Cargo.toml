@@ -1,0 +1,17 @@
+[package]
+name = "sudachi_rs_wrapper"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[[bin]]
+name = "sudachi_test"
+path = "src/main.rs"
+
+
+[dependencies]
+sudachi = { git = "https://github.com/WorksApplications/sudachi.rs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

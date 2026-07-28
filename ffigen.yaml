@@ -1,16 +1,21 @@
 # Run with `dart run ffigen --config ffigen.yaml`.
 name: SudachiDartBindings
+
 description: |
   Bindings for `src/sudachi_dart.h`.
 
   Regenerate bindings with `dart run ffigen --config ffigen.yaml`.
-output: 'lib/sudachi_dart_bindings_generated.dart'
+
 headers:
   entry-points:
-    - 'src/sudachi_dart.h'
+    - "src/sudachi_dart.h"
   include-directives:
-    - 'src/sudachi_dart.h'
+    - "src/sudachi_dart.h"
+
+output: "lib/sudachi_dart_bindings_generated.dart"
+
 ffi-native:
+
 comments:
   style: any
   length: full

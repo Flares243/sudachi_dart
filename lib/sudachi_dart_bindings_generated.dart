@@ -4,18 +4,66 @@
 // ignore_for_file: type=lint, unused_import
 import 'dart:ffi' as ffi;
 
-/// A very short-lived native function.
-///
-/// For very short-lived functions, it is fine to call them on the main isolate.
-/// They will block the Dart execution while running the native function, so
-/// only do this for native functions which are guaranteed to be short-lived.
-@ffi.Native<ffi.IntPtr Function(ffi.IntPtr, ffi.IntPtr)>()
-external int sum(int a, int b);
+/// Load the Sudachi dictionary. Returns a handle on success, NULL on failure.
+/// Free with sudachi_free_dictionary().
+@ffi.Native<
+  ffi.Pointer<DictionaryHandle> Function(
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Char>,
+    ffi.Pointer<ffi.Char>,
+  )
+>()
+external ffi.Pointer<DictionaryHandle> sudachi_init_dictionary(
+  ffi.Pointer<ffi.Char> config_path,
+  ffi.Pointer<ffi.Char> resource_dir,
+  ffi.Pointer<ffi.Char> dictionary_path,
+);
 
-/// A longer lived native function, which occupies the thread calling it.
+/// Free a handle from sudachi_init_dictionary(). NULL is a no-op.
+@ffi.Native<ffi.Void Function(ffi.Pointer<DictionaryHandle>)>()
+external void sudachi_free_dictionary(ffi.Pointer<DictionaryHandle> handle);
+
+/// Create a tokenizer from dict_handle. The tokenizer keeps its own reference
+/// to the dictionary, so dict_handle may be freed after this call.
+/// Returns a handle on success, NULL on failure.
+/// Free with sudachi_free_tokenizer().
+@ffi.Native<
+  ffi.Pointer<TokenizerHandle> Function(ffi.Pointer<DictionaryHandle>)
+>()
+external ffi.Pointer<TokenizerHandle> sudachi_init_tokenizer(
+  ffi.Pointer<DictionaryHandle> dict_handle,
+);
+
+/// Free a handle from sudachi_init_tokenizer(). NULL is a no-op.
+@ffi.Native<ffi.Void Function(ffi.Pointer<TokenizerHandle>)>()
+external void sudachi_free_tokenizer(ffi.Pointer<TokenizerHandle> handle);
+
+/// Tokenize text and return morphemes as a UTF-8 JSON string.
+/// mode:         0=A (short), 1=B (middle), 2=C (long)
+/// enable_debug: 0=off, non-zero=on
+/// Returns a NUL-terminated string on success, NULL on failure.
+/// Free the result with sudachi_free_string().
 ///
-/// Do not call these kind of native functions in the main isolate. They will
-/// block Dart execution. This will cause dropped frames in Flutter applications.
-/// Instead, call these native functions on a separate isolate.
-@ffi.Native<ffi.IntPtr Function(ffi.IntPtr, ffi.IntPtr)>()
-external int sum_long_running(int a, int b);
+/// JSON shape: [{"surface","dictionary_form","normalized_form","reading_form","part_of_speech":[]}, ...]
+@ffi.Native<
+  ffi.Pointer<ffi.Char> Function(
+    ffi.Pointer<TokenizerHandle>,
+    ffi.Pointer<ffi.Char>,
+    ffi.Uint8,
+    ffi.Uint8,
+  )
+>()
+external ffi.Pointer<ffi.Char> sudachi_tokenize(
+  ffi.Pointer<TokenizerHandle> tokenizer,
+  ffi.Pointer<ffi.Char> text,
+  int mode,
+  int enable_debug,
+);
+
+/// Free a string from sudachi_tokenize(). NULL is a no-op.
+@ffi.Native<ffi.Void Function(ffi.Pointer<ffi.Char>)>()
+external void sudachi_free_string(ffi.Pointer<ffi.Char> s);
+
+final class DictionaryHandle extends ffi.Opaque {}
+
+final class TokenizerHandle extends ffi.Opaque {}
