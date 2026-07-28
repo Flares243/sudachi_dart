@@ -17,13 +17,6 @@ A Flutter FFI plugin for Japanese morphological analysis using [Sudachi](https:/
 - [Rust toolchain](https://rustup.rs) — the native library is built from source at compile time.
 - A Sudachi system dictionary (`.dic` file) — **not bundled**, see [Dictionary](#dictionary) below.
 
-## Installation
-
-```yaml
-dependencies:
-  sudachi_dart: ^0.0.1
-```
-
 ## Usage
 
 ```dart
