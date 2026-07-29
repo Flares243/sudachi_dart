@@ -1,3 +1,7 @@
+## 0.0.4
+
+* Centralized module exports to allow importing from a single entry point.
+
 ## 0.0.3
 
 * Update supported platforms.
