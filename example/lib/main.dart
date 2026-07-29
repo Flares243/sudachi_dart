@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:sudachi_dart/sudachi.dart';
+import 'package:sudachi_dart/sudachi_dart.dart';
 import 'package:path/path.dart' as path;
 
 Future<({String dictFile, String jsonFile})>
