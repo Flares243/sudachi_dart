@@ -29,3 +29,4 @@ flutter:
 
   assets:
     - assets/sudachi/sudachi.json
+    - assets/sudachi/system_full.dic

@@ -12,7 +12,7 @@ headers:
   include-directives:
     - "src/sudachi_dart.h"
 
-output: "lib/sudachi_dart_bindings_generated.dart"
+output: "lib/src/sudachi_dart_bindings_generated.dart"
 
 ffi-native:
 

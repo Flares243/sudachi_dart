@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 import 'package:logging/logging.dart';
+import 'package:path/path.dart' as path;
 
 void main(List<String> args) async {
   await build(args, (input, output) async {
@@ -16,30 +17,30 @@ void main(List<String> args) async {
 
     final targetOS = input.config.code.targetOS;
     final targetArch = input.config.code.targetArchitecture;
-    final packageRoot = input.packageRoot.toFilePath();
-    final sep = Platform.pathSeparator;
-    final rustProjectDir = '${packageRoot}src${sep}sudachi_rs_wrapper';
 
-    final rustTarget = _getRustTargetTriple(targetOS, targetArch);
+    final rustProjectUri = input.packageRoot.resolve('src/sudachi_rs_wrapper/');
+    final rustProjectDir = rustProjectUri.toFilePath();
+
+    final rustTarget = switch ((targetOS, targetArch)) {
+      (OS.macOS, Architecture.arm64) => 'aarch64-apple-darwin',
+      (OS.macOS, Architecture.x64) => 'x86_64-apple-darwin',
+      (OS.windows, Architecture.x64) => 'x86_64-pc-windows-msvc',
+      _ => null,
+    };
 
     logger.info(
       'Building Rust library for $targetOS ($targetArch -> $rustTarget)…',
     );
 
-    final cargoArgs = [
+    final cargoResult = await Process.run('cargo', [
       'build',
       '--release',
       if (rustTarget != null) ...['--target', rustTarget],
-    ];
-
-    final cargoResult = await Process.run(
-      'cargo',
-      cargoArgs,
-      workingDirectory: rustProjectDir,
-    );
+    ], workingDirectory: rustProjectDir);
 
     if (cargoResult.exitCode != 0) {
       logger.severe(cargoResult.stderr.toString());
+
       throw Exception(
         'cargo build --release failed (exit ${cargoResult.exitCode})',
       );
@@ -48,39 +49,27 @@ void main(List<String> args) async {
     final libFileName = switch (targetOS) {
       OS.macOS => 'libsudachi_rs_wrapper.dylib',
       OS.windows => 'sudachi_rs_wrapper.dll',
-      OS.linux => 'libsudachi_rs_wrapper.so',
       _ => throw Exception('Unsupported target OS: $targetOS'),
     };
 
     final targetDir = rustTarget != null
-        ? '$rustProjectDir${sep}target$sep$rustTarget${sep}release'
-        : '$rustProjectDir${sep}target${sep}release';
+        ? path.join(rustProjectDir, 'target', rustTarget, 'release')
+        : path.join(rustProjectDir, 'target', 'release');
 
-    final libPath = '$targetDir$sep$libFileName';
+    final libPath = path.join(targetDir, libFileName);
 
     output.assets.code.add(
       CodeAsset(
         package: input.packageName,
-        name: '${input.packageName}_bindings_generated.dart',
+        name: 'src/${input.packageName}_bindings_generated.dart',
         linkMode: DynamicLoadingBundled(),
         file: Uri.file(libPath),
       ),
     );
 
     output.dependencies
-      ..add(Uri.file('$rustProjectDir${sep}src${sep}lib.rs'))
-      ..add(Uri.file('$rustProjectDir${sep}Cargo.toml'))
-      ..add(Uri.file('$rustProjectDir${sep}Cargo.lock'));
+      ..add(rustProjectUri.resolve('src/lib.rs'))
+      ..add(rustProjectUri.resolve('Cargo.toml'))
+      ..add(rustProjectUri.resolve('Cargo.lock'));
   });
-}
-
-String? _getRustTargetTriple(OS os, Architecture arch) {
-  return switch ((os, arch)) {
-    (OS.macOS, Architecture.arm64) => 'aarch64-apple-darwin',
-    (OS.macOS, Architecture.x64) => 'x86_64-apple-darwin',
-    (OS.linux, Architecture.x64) => 'x86_64-unknown-linux-gnu',
-    (OS.linux, Architecture.arm64) => 'aarch64-unknown-linux-gnu',
-    (OS.windows, Architecture.x64) => 'x86_64-pc-windows-msvc',
-    _ => null,
-  };
 }
