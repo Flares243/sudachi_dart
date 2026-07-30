@@ -83,6 +83,11 @@ class SudachiDictionary implements Finalizable {
     _dictFinalizer.attach(this, _handle.cast(), detach: this);
   }
 
+  static Future<bool> validateDictionary(String dictionaryPath) async {
+    final result = await Isolate.run(() => _callNativeValidate(dictionaryPath));
+    return result;
+  }
+
   /// Loads the dictionary on a background isolate.
   ///
   /// Safe to call from the UI isolate — does not block.
@@ -170,6 +175,19 @@ class SudachiTokenizer implements Finalizable {
 }
 
 // -- Native helpers (isolate-safe) ------------------------------------------
+
+bool _callNativeValidate(String dictionaryPath) {
+  final dictionaryPathPtr = dictionaryPath.toNativeUtf8();
+  try {
+    final handle = bindings.sudachi_is_valid_dictionary(
+      dictionaryPathPtr.cast(),
+    );
+
+    return handle;
+  } finally {
+    malloc.free(dictionaryPathPtr);
+  }
+}
 
 int _callNativeInitDictionary(
   String? configPath,

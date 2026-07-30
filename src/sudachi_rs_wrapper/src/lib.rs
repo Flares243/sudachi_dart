@@ -1,9 +1,12 @@
 use std::ffi::{CStr, CString};
+use std::fs::File;
+use std::io::Read;
 use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
+use sudachi::dic::header::Header;
 use sudachi::{
     analysis::stateless_tokenizer::StatelessTokenizer,
     analysis::{Mode, Tokenize},
@@ -224,6 +227,33 @@ pub extern "C" fn sudachi_free_string(s: *mut c_char) {
     if !s.is_null() {
         unsafe { drop(CString::from_raw(s)) };
     }
+}
+
+/// Returns `true` if `dictionary_path` points to a valid `.dic` file.
+#[unsafe(no_mangle)]
+pub extern "C" fn sudachi_is_valid_dictionary(dictionary_path: *const c_char) -> bool {
+    if dictionary_path.is_null() {
+        return false;
+    }
+
+    let path_str = match unsafe { CStr::from_ptr(dictionary_path) }.to_str() {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!("[Sudachi Error] {err:?}");
+            return false;
+        }
+    };
+
+    let Ok(mut file) = File::open(path_str) else {
+        return false;
+    };
+
+    let mut header_bytes = [0u8; 288];
+    if file.read_exact(&mut header_bytes).is_err() {
+        return false;
+    }
+
+    Header::parse(&header_bytes).is_ok()
 }
 
 #[cfg(test)]
