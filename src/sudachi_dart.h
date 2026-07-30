@@ -2,6 +2,7 @@
 #define SUDACHI_DART_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /* Opaque handles ------------------------------------------------------------*/
 
@@ -40,5 +41,8 @@ char *sudachi_tokenize(TokenizerHandle *tokenizer,
 
 /* Free a string from sudachi_tokenize(). NULL is a no-op. */
 void sudachi_free_string(char *s);
+
+/// Returns `true` if `dictionary_path` points to a valid `.dic` file.
+bool sudachi_is_valid_dictionary(const char *dictionary_path);
 
 #endif /* SUDACHI_DART_H */

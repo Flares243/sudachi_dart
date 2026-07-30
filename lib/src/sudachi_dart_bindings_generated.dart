@@ -42,6 +42,12 @@ external ffi.Pointer<TokenizerHandle> sudachi_init_tokenizer(
   ffi.Pointer<DictionaryHandle> dict_handle,
 );
 
+/// Returns `true` if `dictionary_path` points to a valid `.dic` file.
+@ffi.Native<ffi.Bool Function(ffi.Pointer<ffi.Char>)>()
+external bool sudachi_is_valid_dictionary(
+  ffi.Pointer<ffi.Char> dictionary_path,
+);
+
 /// Tokenize text and return morphemes as a UTF-8 JSON string.
 /// mode:         0=A (short), 1=B (middle), 2=C (long)
 /// enable_debug: 0=off, non-zero=on

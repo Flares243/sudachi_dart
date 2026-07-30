@@ -28,6 +28,10 @@ _extractDictionaryIfNeeded() async {
 
   final dicFile = File(path.join(dictionaryDir.path, 'system_full.dic'));
 
+  print(
+    'valid dictionary: ${await SudachiDictionary.validateDictionary(dicFile.path)}',
+  );
+
   if (!dicFile.existsSync()) {
     final bytes = await rootBundle.load('assets/sudachi/system_full.dic');
     await dicFile.writeAsBytes(bytes.buffer.asUint8List());

@@ -1,6 +1,10 @@
+## 0.0.5
+
+New feature: you can now validate if a `.dic` file is a Sudachi dictionary file.
+
 ## 0.0.4
 
-* Centralized module exports to allow importing from a single entry point.
+Centralized module exports to allow importing from a single entry point.
 
 ## 0.0.3
 
