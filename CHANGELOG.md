@@ -1,3 +1,9 @@
+## 0.0.6
+
+**Breaking changes:**
+* `SudachiDictionary` and `SudachiTokenizer` are now plain constructors with an async `init()` instance method instead of static factory methods.
+* `SudachiDictionary.validateDictionary()` renamed to `SudachiDictionary.validateFile()`.
+
 ## 0.0.5
 
 New feature: you can now validate if a `.dic` file is a Sudachi dictionary file.
