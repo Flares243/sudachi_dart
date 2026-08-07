@@ -22,12 +22,14 @@ A Flutter FFI plugin for Japanese morphological analysis using [Sudachi](https:/
 ```dart
 import 'package:sudachi_dart/sudachi_dart.dart';
 
-final dict = await SudachiDictionary.init(
+final dict = SudachiDictionary()
+await dict.init(
   configPath: '/path/to/sudachi.json',
   dictionaryPath: '/path/to/system_full.dic',
 );
 
-final tokenizer = await SudachiTokenizer.init(dict);
+final tokenizer = SudachiTokenizer()
+await tokenizer.init(dict);
 
 final morphemes = await tokenizer.tokenize('東京都に住む', mode: Mode.c);
 
@@ -56,7 +58,7 @@ dict.dispose();
 | `dictionaryForm` | Base (dictionary) form |
 | `normalizedForm` | Normalized form |
 | `readingForm` | Yomi (reading) in katakana |
-| `partOfSpeech` | Up to 8 hierarchical POS tags |
+| `partOfSpeech` | Six elements: `[品詞, 品詞細分類1, 品詞細分類2, 品詞細分類3, 活用型, 活用形]` — four POS levels, conjugation type, conjugation form. Non-applicable fields contain `"*"`. |
 
 ## Dictionary
 

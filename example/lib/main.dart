@@ -29,7 +29,7 @@ _extractDictionaryIfNeeded() async {
   final dicFile = File(path.join(dictionaryDir.path, 'system_full.dic'));
 
   print(
-    'valid dictionary: ${await SudachiDictionary.validateDictionary(dicFile.path)}',
+    'valid dictionary: ${await SudachiDictionary.validateFile(dicFile.path)}',
   );
 
   if (!dicFile.existsSync()) {
@@ -90,11 +90,13 @@ class _TokenizerPageState extends State<TokenizerPage> {
 
     try {
       final paths = await _extractDictionaryIfNeeded();
-      final dict = await SudachiDictionary.init(
+      final dict = SudachiDictionary();
+      await dict.init(
         dictionaryPath: paths.dictFile,
         configPath: paths.jsonFile,
       );
-      final tok = await SudachiTokenizer.init(dict);
+      final tok = SudachiTokenizer();
+      await tok.init(dict);
       setState(() {
         _dictionary = dict;
         _tokenizer = tok;

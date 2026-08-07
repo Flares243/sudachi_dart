@@ -28,7 +28,7 @@ class Morpheme {
   final String normalizedForm;
   final String readingForm;
 
-  /// Hierarchical part-of-speech tags (up to 8 elements including conjugation).
+  /// Six-element POS tuple: four POS levels, conjugation type, and conjugation form.
   final List<String> partOfSpeech;
 
   const Morpheme({
@@ -76,14 +76,16 @@ final _tokenizerFinalizer = NativeFinalizer(
 /// Load once with [init], then share across [SudachiTokenizer]s.
 /// Call [dispose] when done.
 class SudachiDictionary implements Finalizable {
-  final Pointer<bindings.DictionaryHandle> _handle;
+  String? configPath;
+  String? resourceDir;
+  String? dictionaryPath;
+
+  Pointer<bindings.DictionaryHandle>? _handle;
   bool _disposed = false;
 
-  SudachiDictionary._(this._handle) {
-    _dictFinalizer.attach(this, _handle.cast(), detach: this);
-  }
+  SudachiDictionary();
 
-  static Future<bool> validateDictionary(String dictionaryPath) async {
+  static Future<bool> validateFile(String dictionaryPath) async {
     final result = await Isolate.run(() => _callNativeValidate(dictionaryPath));
     return result;
   }
@@ -91,22 +93,42 @@ class SudachiDictionary implements Finalizable {
   /// Loads the dictionary on a background isolate.
   ///
   /// Safe to call from the UI isolate — does not block.
-  static Future<SudachiDictionary> init({
+  Future<void> init({
     String? configPath,
     String? resourceDir,
     String? dictionaryPath,
   }) async {
+    if (_disposed) {
+      throw StateError('Cannot re-initialize a disposed dictionary.');
+    }
+
+    // Free any previously-loaded handle before overwriting it.
+    final existingHandle = _handle;
+    if (existingHandle != null) {
+      _dictFinalizer.detach(this);
+      bindings.sudachi_free_dictionary(existingHandle);
+      _handle = null;
+    }
+
+    this.configPath = configPath;
+    this.resourceDir = resourceDir;
+    this.dictionaryPath = dictionaryPath;
+
     final address = await Isolate.run(
       () => _callNativeInitDictionary(configPath, resourceDir, dictionaryPath),
     );
-    return SudachiDictionary._(Pointer.fromAddress(address));
+    _handle = Pointer.fromAddress(address);
+    _dictFinalizer.attach(this, _handle!.cast(), detach: this);
   }
 
   /// Frees the native dictionary. Do not use this object afterwards.
   void dispose() {
     if (!_disposed) {
-      _dictFinalizer.detach(this);
-      bindings.sudachi_free_dictionary(_handle);
+      final handle = _handle;
+      if (handle != null) {
+        _dictFinalizer.detach(this);
+        bindings.sudachi_free_dictionary(handle);
+      }
       _disposed = true;
     }
   }
@@ -118,32 +140,46 @@ class SudachiDictionary implements Finalizable {
 ///
 /// Call [dispose] when done.
 class SudachiTokenizer implements Finalizable {
-  final Pointer<bindings.TokenizerHandle> _handle;
+  SudachiDictionary? dictionary;
+
+  Pointer<bindings.TokenizerHandle>? _handle;
   bool _disposed = false;
 
-  SudachiTokenizer._(this._handle) {
-    _tokenizerFinalizer.attach(this, _handle.cast(), detach: this);
-  }
+  SudachiTokenizer();
 
-  /// Creates a tokenizer from [dictionary].
-  ///
-  /// The tokenizer keeps its own reference to the dictionary data,
-  /// so [dictionary] can be disposed after this call.
-  ///
   /// Safe to call from the UI isolate — does not block.
-  ///
-  /// Throws [StateError] if initialisation fails.
-  static Future<SudachiTokenizer> init(SudachiDictionary dictionary) async {
+  Future<void> init(SudachiDictionary dictionary) async {
+    if (_disposed) {
+      throw StateError('Cannot re-initialize a disposed tokenizer.');
+    }
+
     if (dictionary._disposed) {
       throw StateError('Cannot create tokenizer from a disposed dictionary.');
     }
 
-    final dictHandleAddress = dictionary._handle.address;
+    final dictHandle = dictionary._handle;
+    if (dictHandle == null) {
+      throw StateError(
+        'Dictionary has not been initialized. Call init() first.',
+      );
+    }
+
+    // Free any previously-created handle before overwriting it.
+    final existingHandle = _handle;
+    if (existingHandle != null) {
+      _tokenizerFinalizer.detach(this);
+      bindings.sudachi_free_tokenizer(existingHandle);
+      _handle = null;
+    }
+
+    this.dictionary = dictionary;
+
+    final dictHandleAddress = dictHandle.address;
     final address = await Isolate.run(
       () => _callNativeInitTokenizer(dictHandleAddress),
     );
-
-    return SudachiTokenizer._(Pointer.fromAddress(address));
+    _handle = Pointer.fromAddress(address);
+    _tokenizerFinalizer.attach(this, _handle!.cast(), detach: this);
   }
 
   /// Tokenizes [text] on a background isolate.
@@ -153,13 +189,20 @@ class SudachiTokenizer implements Finalizable {
     bool enableDebug = false,
   }) async {
     if (_disposed) throw StateError('Tokenizer has been disposed.');
+    final handle = _handle;
+
+    if (handle == null) {
+      throw StateError(
+        'Tokenizer has not been initialized. Call init() first.',
+      );
+    }
 
     final port = await _helperIsolateSendPort;
     final id = _nextRequestId++;
     final completer = Completer<List<Morpheme>>();
 
     _pendingRequests[id] = completer;
-    port.send(_TokenizeRequest(id, _handle.address, text, mode, enableDebug));
+    port.send(_TokenizeRequest(id, handle.address, text, mode, enableDebug));
 
     return completer.future;
   }
@@ -167,8 +210,11 @@ class SudachiTokenizer implements Finalizable {
   /// Frees the native tokenizer. Do not use this object afterwards.
   void dispose() {
     if (!_disposed) {
-      _tokenizerFinalizer.detach(this);
-      bindings.sudachi_free_tokenizer(_handle);
+      final handle = _handle;
+      if (handle != null) {
+        _tokenizerFinalizer.detach(this);
+        bindings.sudachi_free_tokenizer(handle);
+      }
       _disposed = true;
     }
   }
