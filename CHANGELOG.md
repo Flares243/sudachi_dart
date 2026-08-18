@@ -1,3 +1,8 @@
+## 0.0.7
+
+* Improved `Sudachi.toString()` method to output more detailed information.
+* Updated `SudachiTokenizer.tokenize()` to return raw JSON output for customization.
+
 ## 0.0.6
 
 **Breaking changes:**

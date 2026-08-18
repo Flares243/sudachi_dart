@@ -120,8 +120,8 @@ class _TokenizerPageState extends State<TokenizerPage> {
     });
 
     try {
-      final morphemes = await tokenizer.tokenize(text, mode: _selectedMode);
-      setState(() => _morphemes = morphemes);
+      final result = await tokenizer.tokenize(text, mode: _selectedMode);
+      setState(() => _morphemes = result.morphemes);
     } catch (e) {
       setState(() => _error = 'Tokenization failed: $e');
     } finally {
